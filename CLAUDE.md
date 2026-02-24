@@ -25,9 +25,9 @@ Provider selection logic: if `NEBIUS_API_KEY` is set → use Nebius. Else if `OP
 ## Commands
 
 ```bash
-# Setup
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+# Setup (uses uv — faster than pip; install once with: brew install uv)
+uv venv .venv && source .venv/bin/activate
+uv pip install -r requirements.txt
 
 # Run server (port 8000 is a hard requirement)
 uvicorn app.main:app --host 0.0.0.0 --port 8000
