@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from app.models import SummarizeRequest, SummarizeResponse, ErrorResponse
-from app.github_client import parse_github_url
+from app.github_client import parse_github_url, get_repo
 
 app = FastAPI()
 
@@ -16,5 +16,9 @@ async def echo(req: SummarizeRequest):
 async def summarize(req: SummarizeRequest):
     owner, repo = parse_github_url(req.github_url)
     return SummarizeResponse(summary="stub", technologies=["stub"], structure="stub")
-    print(f"Owner: {owner}, Repo: {repo}")
     
+
+@app.get("/debug/repo")
+async def debug_repo(owner: str, repo: str):
+    data = get_repo(owner, repo)
+    return data
