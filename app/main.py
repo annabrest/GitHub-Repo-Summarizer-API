@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from app.models import SummarizeRequest, SummarizeResponse, ErrorResponse
-from app.github_client import parse_github_url, get_repo
+from app.github_client import parse_github_url, get_repo, get_default_branch_sha, get_tree_sha, get_recursive_tree
 
 app = FastAPI()
 
@@ -17,8 +17,16 @@ async def summarize(req: SummarizeRequest):
     owner, repo = parse_github_url(req.github_url)
     return SummarizeResponse(summary="stub", technologies=["stub"], structure="stub")
     
-
 @app.get("/debug/repo")
 async def debug_repo(owner: str, repo: str):
     data = get_repo(owner, repo)
     return data
+
+@app.get("/debug/tree")
+async def debug_tree(owner: str, repo: str):
+    repo_info = get_repo(owner, repo)                          # → gets default_branch
+    branch = repo_info["default_branch"]
+    commit_sha = get_default_branch_sha(owner, repo, branch)   # → gets commit SHA
+    tree_sha = get_tree_sha(owner, repo, commit_sha)          # → gets tree SHA
+    files = get_recursive_tree(owner, repo, tree_sha)      # → gets all files
+    return {"repo_info": repo_info, "branch": branch, "commit_sha": commit_sha, "tree_sha": tree_sha, "files": files}

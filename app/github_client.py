@@ -3,6 +3,17 @@ from fastapi import HTTPException
 import httpx
 import os
 
+def _github_get(url: str) -> dict:
+    token = os.getenv("GITHUB_TOKEN")
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    response = httpx.get(url, headers=headers)
+    if response.status_code == 404:
+        raise HTTPException(status_code=404, detail=f"Resource not found: {url}")
+    if response.status_code == 403:
+        raise HTTPException(status_code=403, detail="Private repo or rate limit exceeded")
+    response.raise_for_status()  # catches other unexpected errors (500, 403, etc.)
+    return response.json()
+
 def parse_github_url(url: str) -> tuple[str, str]:
     parsed = urlparse(url.strip())
     if parsed.scheme != "https" or parsed.netloc != "github.com":
@@ -15,15 +26,24 @@ def parse_github_url(url: str) -> tuple[str, str]:
     return owner, repo
 
 def get_repo(owner: str, repo: str) -> dict:
-    token = os.getenv("GITHUB_TOKEN")
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
-    response = httpx.get(f"https://api.github.com/repos/{owner}/{repo}", headers=headers)
-    if response.status_code == 404:
-        raise HTTPException(status_code=404, detail=f"Repo '{owner}/{repo}' not found on GitHub")
-    if response.status_code == 403:
-        raise HTTPException(status_code=403, detail="Private repo or rate limit exceeded")
-    response.raise_for_status()  # catches other unexpected errors (500, 403, etc.)
+    data=_github_get(f"https://api.github.com/repos/{owner}/{repo}")
+    return data
 
-    return response.json()  # returns a dictionary of the response
+
+def get_default_branch(owner: str, repo: str) -> str:
+    data=get_repo(owner, repo)
+    return data["default_branch"]
+
+def get_default_branch_sha(owner: str, repo: str, default_branch: str) -> str:
+    data=_github_get(f"https://api.github.com/repos/{owner}/{repo}/branches/{default_branch}")
+    return data["commit"]["sha"]
+
+def get_tree_sha(owner: str, repo: str, commit_sha: str) -> str:
+    data=_github_get(f"https://api.github.com/repos/{owner}/{repo}/git/commits/{commit_sha}")
+    return data["tree"]["sha"]
+
+def get_recursive_tree(owner: str, repo: str, tree_sha: str) -> list[dict]:
+    data=_github_get(f"https://api.github.com/repos/{owner}/{repo}/git/trees/{tree_sha}?recursive=1")
+    return data["tree"]
 
 
