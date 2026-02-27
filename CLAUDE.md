@@ -44,4 +44,9 @@ pytest tests/test_parsing.py   # single test file
 
 ## Implementation plan
 
-See `Implimentation_plan_PRD_v1.2.1` for the full step-by-step build plan (Steps 0–18).
+See `Implimentation/Implimentation_plan_PRD_v1.2.2.md` for the full step-by-step build plan (Steps 0–18).
+
+See PRD `PRD/PRD_GitHub_Summarizer_API_v1.2.2.md` for the full product requirements document.
+
+## Memory
+See `.claude/memory/MEMORY.md` for session context and architectural decisions.
