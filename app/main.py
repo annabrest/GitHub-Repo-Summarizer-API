@@ -3,7 +3,7 @@ load_dotenv()
 
 from fastapi import FastAPI
 from app.models import SummarizeRequest, SummarizeResponse, ErrorResponse
-from app.github_client import parse_github_url, get_repo, get_default_branch_sha, get_tree_sha, get_recursive_tree
+from app.github_client import parse_github_url, get_repo, get_default_branch_sha, get_tree_sha, get_recursive_tree, get_file_content
 from app.selection import select_files
 
 app = FastAPI()
@@ -45,6 +45,13 @@ async def debug_selection(owner: str, repo: str):
     selected_files = select_files(files)
     return { "total": len(files), "selected": len(selected_files), "files": selected_files}
     
+@app.get("/debug/file")
+async def debug_file(owner: str, repo: str, path: str):
+    repo_info = get_repo(owner, repo)
+    branch = repo_info["default_branch"]
+    content = get_file_content(owner, repo, path, ref=branch, max_chars=500)
+    return {"path": path, "branch": branch, "chars": len(content), "preview": content}
+
 @app.get("/debug/scores")
 async def debug_scores(owner: str, repo: str):
     from app.selection import score_file, get_group, get_package_roots, is_priority, is_excluded_path, is_binary

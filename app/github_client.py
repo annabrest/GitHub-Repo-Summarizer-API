@@ -2,6 +2,7 @@ from urllib.parse import urlparse
 from fastapi import HTTPException
 import httpx
 import os
+import base64
 
 def _github_get(url: str) -> dict:
     token = os.getenv("GITHUB_TOKEN")
@@ -50,4 +51,12 @@ def get_recursive_tree(owner: str, repo: str, tree_sha: str) -> list[dict]:
     data=_github_get(f"https://api.github.com/repos/{owner}/{repo}/git/trees/{tree_sha}?recursive=1")
     return data["tree"]
 
-
+def get_file_content(owner: str, repo: str, path: str, ref: str, max_chars: int = 10_000) -> str:
+    data = _github_get(f"https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={ref}")
+    if data.get("encoding") != "base64":
+        return ""
+    try:
+        text = base64.b64decode(data["content"]).decode("utf-8", errors="replace")
+    except (UnicodeDecodeError, Exception):
+        return ""
+    return text[:max_chars]
