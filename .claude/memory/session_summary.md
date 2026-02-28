@@ -16,6 +16,8 @@
 | 9 | get_file_content() with base64 decode + ref param + /debug/file endpoint | app/github_client.py, app/main.py |
 | 10 | build_context() with char budgets + /debug/context endpoint + timeout + error handling | app/context.py, app/main.py, app/github_client.py |
 | 11+12 | settings.py (provider config), llm_client.py (async httpx, prompts, map/reduce builders), /debug/llm endpoint | app/settings.py, app/llm_client.py, app/main.py |
+| 13 | parsing.py: parse_llm_response() 3-attempt fallback + _validate() + tests/test_parsing.py (6/6) | app/parsing.py, tests/test_parsing.py |
+| 14 | routes.py: real /summarize pipeline (8 steps), removed stub from main.py | app/routes.py, app/main.py |
 
 ---
 
@@ -75,8 +77,19 @@ Full Filter → Prioritize → Cover → Fill implementation:
 ### app/main.py endpoints (updated)
 - GET /debug/llm — sends tiny test context, returns raw LLM response
 
-### app/parsing.py, app/routes.py
-- Still empty placeholders
+### app/parsing.py
+- `parse_llm_response(raw) -> dict` — 3-attempt chain: direct → strip fences → bracket extraction
+- `_strip_fences`, `_extract_object`, `_validate` (checks required keys, coerces technologies to list)
+- Bug fixed: try/except/else pattern so validation ValueError propagates immediately
+
+### app/routes.py
+- `router = APIRouter()`
+- `POST /summarize`: URL parse (422 on fail) → get_repo → tree → select_files → build_context → call_llm → parse_llm_response → SummarizeResponse
+- Generic except → 500 with detail (Step 16 refines to specific codes)
+
+### app/main.py (updated)
+- Removed stub /summarize
+- Added `from app.routes import router` + `app.include_router(router)`
 
 ---
 
@@ -107,9 +120,7 @@ Full Filter → Prioritize → Cover → Fill implementation:
 
 | Step | What | File |
 |------|------|------|
-| 13 | JSON parsing + repair fallback (strip fences, extract {}, validate keys) | app/parsing.py |
-| 14 | Wire real /summarize pipeline end-to-end | app/main.py or app/routes.py |
-| 15 | Map→reduce fallback for large repos (max 2 LLM calls) | app/main.py |
+| 15 | Map→reduce fallback for large repos (max 2 LLM calls) | app/routes.py |
 | 16 | Harden errors + timeouts (already partially done: timeout added) | app/github_client.py |
 | 17 | Write README | README.md |
 | 18 | Swap to Nebius + final test | .env |

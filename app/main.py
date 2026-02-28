@@ -2,11 +2,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI
-from app.models import SummarizeRequest, SummarizeResponse, ErrorResponse
+from app.models import SummarizeRequest, ErrorResponse
 from app.github_client import parse_github_url, get_repo, get_default_branch_sha, get_tree_sha, get_recursive_tree, get_file_content
 from app.selection import select_files
+from app.routes import router
 
 app = FastAPI()
+app.include_router(router)
 
 @app.get("/health")
 async def health_check():
@@ -15,11 +17,6 @@ async def health_check():
 @app.post("/echo")
 async def echo(req: SummarizeRequest):
     return req
-
-@app.post("/summarize", response_model=SummarizeResponse)
-async def summarize(req: SummarizeRequest):
-    owner, repo = parse_github_url(req.github_url)
-    return SummarizeResponse(summary="stub", technologies=["stub"], structure="stub")
     
 @app.get("/debug/repo")
 async def debug_repo(owner: str, repo: str):
