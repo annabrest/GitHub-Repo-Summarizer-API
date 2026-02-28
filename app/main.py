@@ -52,6 +52,22 @@ async def debug_file(owner: str, repo: str, path: str):
     content = get_file_content(owner, repo, path, ref=branch, max_chars=500)
     return {"path": path, "branch": branch, "chars": len(content), "preview": content}
 
+@app.get("/debug/context")
+async def debug_context(owner: str, repo: str):
+    from app.context import build_context
+    repo_info = get_repo(owner, repo)
+    branch = repo_info["default_branch"]
+    commit_sha = get_default_branch_sha(owner, repo, branch)
+    tree_sha = get_tree_sha(owner, repo, commit_sha)
+    tree = get_recursive_tree(owner, repo, tree_sha)
+    selected = select_files(tree)
+    result = build_context(owner, repo, branch, repo_info, tree, selected)
+    return {
+        "total_chars": result["total_chars"],
+        "files_included": result["files_included"],
+        "preview": result["context"][:1000],
+    }
+
 @app.get("/debug/scores")
 async def debug_scores(owner: str, repo: str):
     from app.selection import score_file, get_group, get_package_roots, is_priority, is_excluded_path, is_binary

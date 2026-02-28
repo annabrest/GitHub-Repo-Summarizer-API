@@ -7,7 +7,7 @@ import base64
 def _github_get(url: str) -> dict:
     token = os.getenv("GITHUB_TOKEN")
     headers = {"Authorization": f"Bearer {token}"} if token else {}
-    response = httpx.get(url, headers=headers)
+    response = httpx.get(url, headers=headers, timeout=10.0)
     if response.status_code == 404:
         raise HTTPException(status_code=404, detail=f"Resource not found: {url}")
     if response.status_code == 403:
