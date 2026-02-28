@@ -18,6 +18,8 @@
 | 11+12 | settings.py (provider config), llm_client.py (async httpx, prompts, map/reduce builders), /debug/llm endpoint | app/settings.py, app/llm_client.py, app/main.py |
 | 13 | parsing.py: parse_llm_response() 3-attempt fallback + _validate() + tests/test_parsing.py (6/6) | app/parsing.py, tests/test_parsing.py |
 | 14 | routes.py: real /summarize pipeline (8 steps), removed stub from main.py | app/routes.py, app/main.py |
+| 15 | Map→reduce fallback: trigger on budget-dropped files, asyncio.gather parallel map calls, graceful fallback to single-pass | app/routes.py, app/llm_client.py |
+| 15+ | Logging: basicConfig(INFO) in main.py, logger in routes.py (map/reduce trigger/success/fallback) + llm_client.py (token usage per call with label), httpx/httpcore silenced to WARNING | app/main.py, app/routes.py, app/llm_client.py |
 
 ---
 
@@ -71,8 +73,10 @@ Full Filter → Prioritize → Cover → Fill implementation:
 - Prompts: `SYSTEM_PROMPT` (JSON-only, exact schema), `USER_TEMPLATE` (numbered instructions)
 - Map/reduce: `MAP_SYSTEM`, `REDUCE_SYSTEM`, `build_map_messages(chunk)`, `build_reduce_messages(tree, summaries)`
 - `build_user_message(context_str)` → formatted user message
-- `async call_llm(context_str) -> str` — single-pass, returns raw LLM string
-- `async _chat_completions(messages, config) -> str` — shared HTTP core (AsyncClient, rstrip("/"), raise_for_status)
+- `async call_llm(context_str) -> str` — single-pass, label="single"
+- `async call_llm_map(chunk_context) -> str` — map phase, label="map"
+- `async call_llm_reduce(tree_preview, map_summaries) -> str` — reduce phase, label="reduce"
+- `async _chat_completions(messages, config, label) -> str` — shared HTTP core; logs token usage (prompt/completion/total) per call
 
 ### app/main.py endpoints (updated)
 - GET /debug/llm — sends tiny test context, returns raw LLM response
@@ -84,12 +88,14 @@ Full Filter → Prioritize → Cover → Fill implementation:
 
 ### app/routes.py
 - `router = APIRouter()`
-- `POST /summarize`: URL parse (422 on fail) → get_repo → tree → select_files → build_context → call_llm → parse_llm_response → SummarizeResponse
-- Generic except → 500 with detail (Step 16 refines to specific codes)
+- `async _map_reduce(owner, repo, branch, repo_info, tree, selected)` — splits selected in half, builds contexts (sync), fires both `call_llm_map` in parallel via `asyncio.gather`, then calls `call_llm_reduce`
+- `POST /summarize`: URL parse (422) → pipeline → if `files_included < selected` trigger map/reduce (fallback to single-pass on exception) → parse → SummarizeResponse
+- Logging: map/reduce triggered (with counts), succeeded, or fallback warning; single-pass INFO
 
-### app/main.py (updated)
-- Removed stub /summarize
-- Added `from app.routes import router` + `app.include_router(router)`
+### app/main.py
+- `logging.basicConfig(level=logging.INFO)` — makes app loggers visible
+- `logging.getLogger("httpx").setLevel(WARNING)` + `httpcore` — silences noisy file-fetch logs
+- Removed stub /summarize; includes router
 
 ---
 
@@ -111,6 +117,9 @@ Full Filter → Prioritize → Cover → Fill implementation:
 | settings.py | simple function, not Pydantic BaseSettings | no extra package; v1 draft rejected as overkill |
 | Steps 11+12 combined | prompts + client in one session | tightly coupled, test immediately |
 | Map/reduce builders | added to llm_client.py now | Step 15 prep; from v1 draft |
+| Map/reduce trigger | files_included < selected (any budget-dropped file) | simple, correct, shows context management |
+| asyncio.gather for map | parallel map LLM calls | ~3s saving on django; bottleneck is GitHub fetches |
+| Logging | basicConfig INFO + suppress httpx/httpcore to WARNING | token usage visible, no noise from file fetches |
 | temperature | 0 (not 0.2) | deterministic JSON output |
 | Tested with | OpenAI (gpt-4o-mini) | Nebius swap is Step 18 |
 
@@ -120,7 +129,6 @@ Full Filter → Prioritize → Cover → Fill implementation:
 
 | Step | What | File |
 |------|------|------|
-| 15 | Map→reduce fallback for large repos (max 2 LLM calls) | app/routes.py |
 | 16 | Harden errors + timeouts (already partially done: timeout added) | app/github_client.py |
 | 17 | Write README | README.md |
 | 18 | Swap to Nebius + final test | .env |

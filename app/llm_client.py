@@ -1,5 +1,9 @@
 import httpx
+import logging
+from fastapi import HTTPException
 from app.settings import get_llm_config
+
+logger = logging.getLogger(__name__)
 
 LLM_TIMEOUT_S = 60.0
 LLM_TEMPERATURE = 0
@@ -70,31 +74,47 @@ async def call_llm(context_str: str) -> str:
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": build_user_message(context_str)},
     ]
-    return await _chat_completions(messages, config)
+    return await _chat_completions(messages, config, label="single")
 
 
 async def call_llm_map(chunk_context: str) -> str:
     config = get_llm_config()
-    return await _chat_completions(build_map_messages(chunk_context), config)
+    return await _chat_completions(build_map_messages(chunk_context), config, label="map")
 
 
 async def call_llm_reduce(tree_preview: str, map_summaries: list) -> str:
     config = get_llm_config()
-    return await _chat_completions(build_reduce_messages(tree_preview, map_summaries), config)
+    return await _chat_completions(build_reduce_messages(tree_preview, map_summaries), config, label="reduce")
 
 
-async def _chat_completions(messages: list[dict], config: dict) -> str:
+async def _chat_completions(messages: list[dict], config: dict, label: str = "llm") -> str:
     url = config["base_url"].rstrip("/") + "/chat/completions"
     payload = {
         "model": config["model"],
         "messages": messages,
         "temperature": LLM_TEMPERATURE,
     }
-    async with httpx.AsyncClient(timeout=LLM_TIMEOUT_S) as client:
-        response = await client.post(
-            url,
-            headers={"Authorization": f"Bearer {config['api_key']}"},
-            json=payload,
-        )
-    response.raise_for_status()
-    return response.json()["choices"][0]["message"]["content"]
+    try:
+        async with httpx.AsyncClient(timeout=LLM_TIMEOUT_S) as client:
+            response = await client.post(
+                url,
+                headers={"Authorization": f"Bearer {config['api_key']}"},
+                json=payload,
+            )
+        response.raise_for_status()
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=502, detail="LLM API timed out")
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="LLM API unreachable")
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"LLM API error: {e.response.status_code}")
+    data = response.json()
+    usage = data.get("usage", {})
+    logger.info(
+        "[%s] tokens — prompt: %s, completion: %s, total: %s",
+        label,
+        usage.get("prompt_tokens", "?"),
+        usage.get("completion_tokens", "?"),
+        usage.get("total_tokens", "?"),
+    )
+    return data["choices"][0]["message"]["content"]

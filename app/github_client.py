@@ -4,10 +4,21 @@ import httpx
 import os
 import base64
 
+GITHUB_TIMEOUT_S = 10.0
+GITHUB_MAX_RETRIES = 2
+
 def _github_get(url: str) -> dict:
     token = os.getenv("GITHUB_TOKEN")
     headers = {"Authorization": f"Bearer {token}"} if token else {}
-    response = httpx.get(url, headers=headers, timeout=10.0)
+    last_exc = None
+    for attempt in range(GITHUB_MAX_RETRIES):
+        try:
+            response = httpx.get(url, headers=headers, timeout=GITHUB_TIMEOUT_S)
+            break
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            last_exc = e
+    else:
+        raise HTTPException(status_code=503, detail=f"GitHub API unreachable after {GITHUB_MAX_RETRIES} attempts: {last_exc}")
     if response.status_code == 404:
         raise HTTPException(status_code=404, detail=f"Resource not found: {url}")
     if response.status_code == 403:

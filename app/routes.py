@@ -1,5 +1,9 @@
+import asyncio
 import json
+import logging
 from fastapi import APIRouter, HTTPException
+
+logger = logging.getLogger(__name__)
 from app.models import SummarizeRequest, SummarizeResponse
 from app.github_client import (
     parse_github_url, get_repo,
@@ -17,10 +21,14 @@ async def _map_reduce(owner, repo, branch, repo_info, tree, selected):
     half = max(1, len(selected) // 2)
     chunks = [selected[:half], selected[half:]] if len(selected) > 1 else [selected]
 
+    contexts = [
+        build_context(owner, repo, branch, repo_info, tree, chunk)["context"]
+        for chunk in chunks
+    ]
+    raws = await asyncio.gather(*[call_llm_map(ctx) for ctx in contexts])
+
     map_summaries = []
-    for chunk in chunks:
-        chunk_result = build_context(owner, repo, branch, repo_info, tree, chunk)
-        raw = await call_llm_map(chunk_result["context"])
+    for raw in raws:
         try:
             map_summaries.append(json.loads(raw))
         except json.JSONDecodeError:
@@ -47,14 +55,23 @@ async def summarize(req: SummarizeRequest):
         tree_sha = get_tree_sha(owner, repo, commit_sha)
         tree = get_recursive_tree(owner, repo, tree_sha)
         selected = select_files(tree)
+        if not selected:
+            raise HTTPException(status_code=422, detail="No useful files found in repository")
         result = build_context(owner, repo, branch, repo_info, tree, selected)
 
         if len(result["files_included"]) < len(selected):
+            logger.info(
+                "map/reduce triggered for %s/%s: %d/%d files included",
+                owner, repo, len(result["files_included"]), len(selected),
+            )
             try:
                 raw = await _map_reduce(owner, repo, branch, repo_info, tree, selected)
-            except Exception:
-                raw = await call_llm(result["context"])  # graceful fallback to single-pass
+                logger.info("map/reduce succeeded for %s/%s", owner, repo)
+            except Exception as exc:
+                logger.warning("map/reduce failed for %s/%s (%s), falling back to single-pass", owner, repo, exc)
+                raw = await call_llm(result["context"])
         else:
+            logger.info("single-pass for %s/%s: all %d files included", owner, repo, len(selected))
             raw = await call_llm(result["context"])
 
         parsed = parse_llm_response(raw)
