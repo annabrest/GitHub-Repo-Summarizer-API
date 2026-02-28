@@ -15,6 +15,7 @@
 | 8 | Full selection.py: Filter → Prioritize → Cover → Fill + /debug/selection, /debug/scores | app/selection.py, app/main.py |
 | 9 | get_file_content() with base64 decode + ref param + /debug/file endpoint | app/github_client.py, app/main.py |
 | 10 | build_context() with char budgets + /debug/context endpoint + timeout + error handling | app/context.py, app/main.py, app/github_client.py |
+| 11+12 | settings.py (provider config), llm_client.py (async httpx, prompts, map/reduce builders), /debug/llm endpoint | app/settings.py, app/llm_client.py, app/main.py |
 
 ---
 
@@ -59,9 +60,23 @@ Full Filter → Prioritize → Cover → Fill implementation:
 - SummarizeResponse(summary, technologies, structure)
 - ErrorResponse(status="error", message)
 
-### app/context.py, app/llm_client.py, app/parsing.py, app/routes.py, app/settings.py
-- context.py: complete (Step 10)
-- llm_client.py, parsing.py, routes.py, settings.py: empty placeholders
+### app/settings.py
+- `get_llm_config() -> dict` — reads env vars, returns {api_key, base_url, model}
+- Priority: NEBIUS_API_KEY (requires LLM_BASE_URL + LLM_MODEL) → OPENAI_API_KEY (defaults: openai/v1, gpt-4o-mini) → ValueError
+
+### app/llm_client.py
+- Constants: `LLM_TIMEOUT_S=60.0`, `LLM_TEMPERATURE=0`
+- Prompts: `SYSTEM_PROMPT` (JSON-only, exact schema), `USER_TEMPLATE` (numbered instructions)
+- Map/reduce: `MAP_SYSTEM`, `REDUCE_SYSTEM`, `build_map_messages(chunk)`, `build_reduce_messages(tree, summaries)`
+- `build_user_message(context_str)` → formatted user message
+- `async call_llm(context_str) -> str` — single-pass, returns raw LLM string
+- `async _chat_completions(messages, config) -> str` — shared HTTP core (AsyncClient, rstrip("/"), raise_for_status)
+
+### app/main.py endpoints (updated)
+- GET /debug/llm — sends tiny test context, returns raw LLM response
+
+### app/parsing.py, app/routes.py
+- Still empty placeholders
 
 ---
 
@@ -77,6 +92,14 @@ Full Filter → Prioritize → Cover → Fill implementation:
 | README fetch budget | MAX_TOTAL_CHARS (60k) then truncate | allows head+tail; if capped at 12k, tail is lost |
 | File fetch errors in build_context | try/except + continue | graceful skip, don't crash whole request |
 | Context budget check | `continue` (not break) | later small files can still fit |
+| LLM HTTP client | raw httpx (not openai SDK) | explicit, no extra dependency |
+| call_llm async | AsyncClient | don't block FastAPI event loop |
+| base_url.rstrip("/") | defensive URL join | handles trailing slash in env var |
+| settings.py | simple function, not Pydantic BaseSettings | no extra package; v1 draft rejected as overkill |
+| Steps 11+12 combined | prompts + client in one session | tightly coupled, test immediately |
+| Map/reduce builders | added to llm_client.py now | Step 15 prep; from v1 draft |
+| temperature | 0 (not 0.2) | deterministic JSON output |
+| Tested with | OpenAI (gpt-4o-mini) | Nebius swap is Step 18 |
 
 ---
 
@@ -84,8 +107,6 @@ Full Filter → Prioritize → Cover → Fill implementation:
 
 | Step | What | File |
 |------|------|------|
-| 11 | LLM client: call OpenAI-compatible API; NEBIUS_API_KEY priority over OPENAI_API_KEY | app/llm_client.py |
-| 12 | Prompts: system message (JSON only), user message template | app/llm_client.py or prompts.py |
 | 13 | JSON parsing + repair fallback (strip fences, extract {}, validate keys) | app/parsing.py |
 | 14 | Wire real /summarize pipeline end-to-end | app/main.py or app/routes.py |
 | 15 | Map→reduce fallback for large repos (max 2 LLM calls) | app/main.py |
