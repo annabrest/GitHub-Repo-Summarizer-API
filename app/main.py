@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from app.models import SummarizeRequest, SummarizeResponse, ErrorResponse
 from app.github_client import parse_github_url, get_repo, get_default_branch_sha, get_tree_sha, get_recursive_tree
+from app.selection import select_files
 
 app = FastAPI()
 
@@ -30,3 +31,14 @@ async def debug_tree(owner: str, repo: str):
     tree_sha = get_tree_sha(owner, repo, commit_sha)          # → gets tree SHA
     files = get_recursive_tree(owner, repo, tree_sha)      # → gets all files
     return {"repo_info": repo_info, "branch": branch, "commit_sha": commit_sha, "tree_sha": tree_sha, "files": files}
+
+@app.get("/debug/selection")
+async def debug_selection(owner: str, repo: str):
+    repo_info = get_repo(owner, repo)                          # → gets default_branch
+    branch = repo_info["default_branch"]
+    commit_sha = get_default_branch_sha(owner, repo, branch)   # → gets commit SHA
+    tree_sha = get_tree_sha(owner, repo, commit_sha)          # → gets tree SHA
+    files = get_recursive_tree(owner, repo, tree_sha)      # → gets all files
+    selected_files = select_files(files)
+    return { "total": len(files), "selected": len(selected_files), "files": selected_files}
+    
