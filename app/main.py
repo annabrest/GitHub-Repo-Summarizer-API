@@ -4,7 +4,8 @@ load_dotenv()
 import logging
 logging.basicConfig(level=logging.INFO)
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from app.models import SummarizeRequest, ErrorResponse
 from app.github_client import parse_github_url, get_repo, get_default_branch_sha, get_tree_sha, get_recursive_tree, get_file_content
 from app.selection import select_files
@@ -12,6 +13,13 @@ from app.routes import router
 
 app = FastAPI()
 app.include_router(router)
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"status": "error", "message": exc.detail},
+    )
 
 @app.get("/health")
 async def health_check():
