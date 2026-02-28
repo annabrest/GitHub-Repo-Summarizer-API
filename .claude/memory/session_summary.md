@@ -20,13 +20,16 @@
 | 14 | routes.py: real /summarize pipeline (8 steps), removed stub from main.py | app/routes.py, app/main.py |
 | 15 | Map→reduce fallback: trigger on budget-dropped files, asyncio.gather parallel map calls, graceful fallback to single-pass | app/routes.py, app/llm_client.py |
 | 15+ | Logging: basicConfig(INFO) in main.py, logger in routes.py (map/reduce trigger/success/fallback) + llm_client.py (token usage per call with label), httpx/httpcore silenced to WARNING | app/main.py, app/routes.py, app/llm_client.py |
+| 16 | Harden errors + timeouts: GITHUB_TIMEOUT_S/GITHUB_MAX_RETRIES constants + for/else retry in _github_get() → 503; empty selection → 422 in routes.py; LLM httpx errors → 502 in _chat_completions() | app/github_client.py, app/routes.py, app/llm_client.py |
+| 17 | README.md: two-part (Quick Start + Architecture & Design); confirmed Nebius URL; model table with deepseek-ai/DeepSeek-V3.2 as recommended | README.md |
 
 ---
 
 ## Current state of key files
 
 ### app/github_client.py
-- `_github_get(url)` — auth headers, 404/403/rate-limit handling, `timeout=10.0`
+- Constants: `GITHUB_TIMEOUT_S=10.0`, `GITHUB_MAX_RETRIES=2`
+- `_github_get(url)` — auth headers; for/else retry loop (ConnectError|TimeoutException) → 503 on exhaustion; 404/403/rate-limit HTTPExceptions
 - `parse_github_url(url)` → (owner, repo)
 - `get_repo(owner, repo)` → dict with default_branch, description
 - `get_default_branch_sha(owner, repo, branch)` → commit SHA
@@ -76,7 +79,7 @@ Full Filter → Prioritize → Cover → Fill implementation:
 - `async call_llm(context_str) -> str` — single-pass, label="single"
 - `async call_llm_map(chunk_context) -> str` — map phase, label="map"
 - `async call_llm_reduce(tree_preview, map_summaries) -> str` — reduce phase, label="reduce"
-- `async _chat_completions(messages, config, label) -> str` — shared HTTP core; logs token usage (prompt/completion/total) per call
+- `async _chat_completions(messages, config, label) -> str` — shared HTTP core; logs token usage (prompt/completion/total) per call; wraps httpx errors as HTTPException(502): TimeoutException, ConnectError, HTTPStatusError
 
 ### app/main.py endpoints (updated)
 - GET /debug/llm — sends tiny test context, returns raw LLM response
@@ -89,7 +92,7 @@ Full Filter → Prioritize → Cover → Fill implementation:
 ### app/routes.py
 - `router = APIRouter()`
 - `async _map_reduce(owner, repo, branch, repo_info, tree, selected)` — splits selected in half, builds contexts (sync), fires both `call_llm_map` in parallel via `asyncio.gather`, then calls `call_llm_reduce`
-- `POST /summarize`: URL parse (422) → pipeline → if `files_included < selected` trigger map/reduce (fallback to single-pass on exception) → parse → SummarizeResponse
+- `POST /summarize`: URL parse (400) → pipeline → empty selection (422) → build_context → map/reduce or single-pass → parse → SummarizeResponse
 - Logging: map/reduce triggered (with counts), succeeded, or fallback warning; single-pass INFO
 
 ### app/main.py
@@ -122,6 +125,15 @@ Full Filter → Prioritize → Cover → Fill implementation:
 | Logging | basicConfig INFO + suppress httpx/httpcore to WARNING | token usage visible, no noise from file fetches |
 | temperature | 0 (not 0.2) | deterministic JSON output |
 | Tested with | OpenAI (gpt-4o-mini) | Nebius swap is Step 18 |
+| GitHub retry | for/else (2 attempts, no sleep) | no new dep; transient errors only; 503 on exhaustion |
+| LLM errors | HTTPException(502) in _chat_completions | semantically correct; propagates via `except HTTPException: raise` in routes |
+| Empty selection | HTTPException(422) before build_context | fast fail, no LLM wasted |
+| Nebius compat | raw httpx == OpenAI SDK wire format | OpenAI-compatible API; no SDK needed |
+| Nebius base URL | https://api.tokenfactory.nebius.com/v1 | confirmed from user's Nebius curl example |
+| Nebius model | deepseek-ai/DeepSeek-V3.2 (recommended) | user tested; better than Llama for code analysis |
+| OpenAI default model | gpt-4o-mini | hardcoded in settings.py:16; override with LLM_MODEL |
+| 500 on NEBIUS_API_KEY=fake (no URL/model) | correct behavior — server misconfiguration | ValueError from get_llm_config() → broad except → 500 |
+| 502 on OPENAI_API_KEY=fake | confirmed working | httpx.HTTPStatusError → HTTPException(502) |
 
 ---
 
@@ -129,8 +141,6 @@ Full Filter → Prioritize → Cover → Fill implementation:
 
 | Step | What | File |
 |------|------|------|
-| 16 | Harden errors + timeouts (already partially done: timeout added) | app/github_client.py |
-| 17 | Write README | README.md |
 | 18 | Swap to Nebius + final test | .env |
 
 ---
