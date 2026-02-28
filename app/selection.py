@@ -26,6 +26,7 @@ HARD_DEPRIORITIZED_DIRS = {"fixtures"}
 
 DEPRIORITIZED_DIRS = {
     'tests', 'test', 'docs', 'examples', 'spec',
+    'bench', 'benches',
 }
 
 PRIORITY_PATTERNS = {
@@ -216,6 +217,8 @@ def select_files(tree_entries: list[dict]) -> list[str]:
             return "github_meta"
         if Path(p).name.startswith("."):
             return "dotfile"
+        if Path(p).name in MANIFEST_FILES:
+            return "manifest"
         if parts and parts[0] in ("docs", "doc"):
             return "docs"
         if parts and parts[0] in ("examples", "example"):
@@ -229,6 +232,7 @@ def select_files(tree_entries: list[dict]) -> list[str]:
         "workflow":    1,   # 1 CI workflow gives enough context
         "github_meta": 1,   # CONTRIBUTING is enough
         "dotfile":     2,
+        "manifest":    4,   # prevent monorepo flooding (50+ package.json/Cargo.toml)
         "docs":        1,
         "examples":    1,   # examples are low signal
         "tests":       0,   # tests don't help explain the project
@@ -277,7 +281,7 @@ def select_files(tree_entries: list[dict]) -> list[str]:
     )[:caps["workflow"]]
 
     priority: list[str] = []
-    for e in non_workflows:
+    for e in sorted(non_workflows, key=lambda e: e['path'].count('/')):  # shallow first
         add_path(priority, e['path'])
     for e in workflows_sorted:
         add_path(priority, e['path'])

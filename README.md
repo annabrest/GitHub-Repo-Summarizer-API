@@ -153,6 +153,68 @@ Expected response format:
 * **Prompting:** forces JSON-only output with a fixed schema; includes repo tree + key file excerpts.
 * **Reliability:** optional `GITHUB_TOKEN`, timeouts, and JSON output repair fallback.
 
+## Design decisions
+
+### File selection strategy: Filter → Prioritize → Cover → Fill
+
+The core challenge is selecting ≤25 files from repos that can have 10,000+ files.
+The pipeline runs in four stages (`app/selection.py`):
+
+**1. Filter** — Hard exclusions, applied first:
+- Binary and media files (`.png`, `.pdf`, `.woff`, `.so`, etc.)
+- Generated/vendor directories (`node_modules/`, `dist/`, `build/`, `.venv/`, `vendor/`)
+- Lock files (`package-lock.json`, `poetry.lock`, etc.) — too noisy, zero signal
+- Files over 200KB — too large to be useful in context
+- Sensitive files (`.pem`, `.key`, `.crt`)
+
+**2. Prioritize** — Always include (subject to caps):
+- Root-level docs: `README.*`, `LICENSE`, `CHANGELOG.*`, `CONTRIBUTING.*`
+- Manifests: `pyproject.toml`, `package.json`, `go.mod`, `Cargo.toml`, `setup.py`
+- Ops/CI: `Dockerfile`, `Makefile`, CI workflow (1 file max)
+- **Monorepo cap:** max 4 manifest files total, root manifests selected first by path depth.
+  This prevents flooding — e.g. a JS monorepo can have 50+ nested `package.json` files.
+
+**3. Coverage** — Top-scoring files per directory group:
+- Monorepo-aware: groups files by package root (detected by manifest presence)
+- `src/` and `lib/` get up to 12 slots; all other groups get 2
+- Minimum score threshold (1.5) filters out low-signal files like `AUTHORS.rst`, `NOTICE`
+- Enforces a minimum of 5 core code files total
+
+**4. Fill** — Remaining budget (up to 25 total) filled by global score ranking.
+
+### Scoring heuristic
+
+Each file gets a float score. Key signals:
+
+| Signal | Points |
+|--------|--------|
+| Name is an entry point (`main`, `app`, `index`, `server`, `routes`, `api`, ...) | +3.0 |
+| Top-level dir is a core dir (`src`, `lib`, `app`, `api`, `server`, `cmd`, `core`) | +3.0 |
+| Same dirs but nested deeper | +1.5 |
+| Code extension (`.py`, `.js`, `.ts`, `.go`, `.rs`, ...) | +1.5 |
+| Core code in important dir (cumulative) | +1.5 |
+| Root-level file | +1.0 |
+| In `test/`, `spec/`, `examples/`, `docs/`, `bench/`, `benches/` | −2.5 to −4.0 |
+| Depth > 5 | −1.0 |
+| File > 50KB | −2.0 |
+
+### Known limitations
+
+**Repos with non-standard directory structure** (e.g. `django/django`):
+Django places its core source under `django/` — not `src/`, `lib/`, or `app/`.
+Since scoring boosts files in `src/lib/app/api/...`, Django's actual core files
+(`django/http/request.py`, `django/db/models/base.py`) score the same as any `.py` file (~1.5).
+Meanwhile, files with entry-point names deep in contrib — like
+`django/contrib/admin/views/main.py` — score 4.5 due to the `main` name boost.
+**Result:** the selection may favor deep `contrib/` files over true core modules.
+A content-aware approach (e.g. import graph analysis) would fix this,
+but is outside scope for a path-only heuristic.
+
+**Very large monorepos** (e.g. `microsoft/fluentui`, 20,000+ files):
+The manifest cap prevents flooding, but coverage breadth is inherently limited at 25 files.
+The selection gives a representative cross-section of sub-apps, not deep coverage of any one.
+
+
 ## Error handling
 
 * 400 invalid URL

@@ -10,7 +10,11 @@ def _github_get(url: str) -> dict:
     if response.status_code == 404:
         raise HTTPException(status_code=404, detail=f"Resource not found: {url}")
     if response.status_code == 403:
-        raise HTTPException(status_code=403, detail="Private repo or rate limit exceeded")
+        body = response.json() if response.content else {}
+        msg = body.get("message", "")
+        if "rate limit" in msg.lower():
+            raise HTTPException(status_code=429, detail="GitHub API rate limit exceeded. Set GITHUB_TOKEN in .env to increase limit.")
+        raise HTTPException(status_code=403, detail="Repository is private or access denied.")
     response.raise_for_status()  # catches other unexpected errors (500, 403, etc.)
     return response.json()
 
