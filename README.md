@@ -61,6 +61,8 @@ Tested Nebius models (set as `LLM_MODEL`):
 | `deepseek-ai/DeepSeek-V3.2` | Recommended — best results for code analysis |
 | `meta-llama/Llama-3.3-70B-Instruct` | Good alternative, reliable JSON output |
 
+DeepSeek-V3.2 was chosen after direct testing: it consistently produces well-structured JSON and reasons accurately over mixed code/config context. Llama-3.3-70B is a reliable fallback but occasionally less precise on technology extraction from large repos.
+
 **For local development (OpenAI):**
 
 ```
@@ -136,6 +138,23 @@ GitHub URL
 ```
 
 No cloning. All file access uses the GitHub Contents API.
+
+### Code Structure
+
+```
+app/
+  main.py          — FastAPI entry point, debug endpoints, exception handler
+  routes.py        — POST /summarize pipeline (orchestrates all steps)
+  github_client.py — GitHub REST API calls, URL parsing, retry logic
+  selection.py     — 4-phase file selector (Filter → Prioritize → Cover → Fill)
+  context.py       — builds LLM prompt from selected files (budget enforcement)
+  llm_client.py    — LLM calls: single-pass, map/reduce, token logging
+  settings.py      — provider config (Nebius or OpenAI, read from env vars)
+  parsing.py       — LLM response parser with 3-attempt fallback
+  models.py        — Pydantic request/response models
+tests/
+  test_parsing.py  — 6 unit tests for LLM response parsing
+```
 
 ---
 
