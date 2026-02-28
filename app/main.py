@@ -68,6 +68,17 @@ async def debug_context(owner: str, repo: str):
         "preview": result["context"][:1000],
     }
 
+@app.get("/debug/llm")
+async def debug_llm():
+    from app.llm_client import call_llm
+    test_context = (
+        "# test/hello\nDescription: A hello world repo\nBranch: main\n\n"
+        "## File tree\nhello.py\n\n"
+        "=== hello.py ===\nprint('hello world')"
+    )
+    raw = await call_llm(test_context)
+    return {"raw": raw}
+
 @app.get("/debug/scores")
 async def debug_scores(owner: str, repo: str):
     from app.selection import score_file, get_group, get_package_roots, is_priority, is_excluded_path, is_binary
