@@ -73,6 +73,16 @@ async def call_llm(context_str: str) -> str:
     return await _chat_completions(messages, config)
 
 
+async def call_llm_map(chunk_context: str) -> str:
+    config = get_llm_config()
+    return await _chat_completions(build_map_messages(chunk_context), config)
+
+
+async def call_llm_reduce(tree_preview: str, map_summaries: list) -> str:
+    config = get_llm_config()
+    return await _chat_completions(build_reduce_messages(tree_preview, map_summaries), config)
+
+
 async def _chat_completions(messages: list[dict], config: dict) -> str:
     url = config["base_url"].rstrip("/") + "/chat/completions"
     payload = {
